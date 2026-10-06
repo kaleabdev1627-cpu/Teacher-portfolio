@@ -1,0 +1,422 @@
+/* ==========================================================================
+   Derese Zewudu – Mathematics Teacher Portfolio
+   script.js  (vanilla JavaScript – works with the existing index.html)
+
+   CONTENTS
+   0.  Helpers
+   1.  Theme (dark / light) + localStorage
+   2.  Header offset + header style on scroll
+   3.  Mobile navigation behaviour
+   4.  Smooth scrolling for internal links
+   5.  Active navigation link
+   6.  Back-to-top button
+   7.  Scroll reveal animations
+   8.  Current year in the footer
+   9.  Graceful handling of missing images
+   10. Contact links (email / phone easy to tap)
+   11. Skip link (keyboard users)
+   12. Start everything
+   Every feature checks that its element exists first, so a missing
+   element never causes a JavaScript error.
+   ========================================================================== */
+
+(function () {
+  'use strict';
+
+  /* ------------------------------------------------------------------------
+     0. HELPERS
+     ------------------------------------------------------------------------ */
+  var root = document.documentElement;
+  var motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+  function $(selector, scope) { return (scope || document).querySelector(selector); }
+  function $$(selector, scope) { return Array.prototype.slice.call((scope || document).querySelectorAll(selector)); }
+  function prefersReducedMotion() { return motionQuery.matches; }
+
+  /* ------------------------------------------------------------------------
+     1. THEME (DARK / LIGHT)
+     ------------------------------------------------------------------------ */
+  var THEME_KEY = 'portfolio-theme';
+
+  function getSavedTheme() {
+    try { return localStorage.getItem(THEME_KEY); } catch (e) { return null; }
+  }
+
+  function saveTheme(theme) {
+    try { localStorage.setItem(THEME_KEY, theme); } catch (e) { /* storage blocked – ignore */ }
+  }
+
+  function applyTheme(theme) {
+    var toggle = $('#themeToggle');
+    var isDark = theme === 'dark';
+    root.setAttribute('data-theme', theme);
+    if (toggle) {
+      toggle.setAttribute('aria-pressed', String(isDark));
+      toggle.setAttribute('aria-label', isDark ? 'Switch to light mode' : 'Switch to dark mode');
+    }
+  }
+
+  function initTheme() {
+    var saved = getSavedTheme();
+    var systemDark = window.matchMedia('(prefers-color-scheme: dark)');
+
+    // Saved choice first, otherwise follow the device setting
+    applyTheme(saved === 'dark' || saved === 'light' ? saved : (systemDark.matches ? 'dark' : 'light'));
+
+    var toggle = $('#themeToggle');
+    if (!toggle) return;
+
+    toggle.addEventListener('click', function () {
+      var next = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+
+      // Brief, subtle colour fade (skipped when reduced motion is on)
+      if (!prefersReducedMotion()) {
+        root.classList.add('theme-transition');
+        window.setTimeout(function () { root.classList.remove('theme-transition'); }, 350);
+      }
+      applyTheme(next);
+      saveTheme(next);
+    });
+
+    // If the visitor never chose a theme, follow device changes live
+    if (systemDark.addEventListener) {
+      systemDark.addEventListener('change', function (e) {
+        if (!getSavedTheme()) applyTheme(e.matches ? 'dark' : 'light');
+      });
+    }
+  }
+
+  /* ------------------------------------------------------------------------
+     2. HEADER OFFSET + HEADER STYLE ON SCROLL
+     ------------------------------------------------------------------------ */
+  var header = $('header');
+
+  // Tells the CSS how tall the sticky header is, so sections stop below it
+  function setHeaderOffset() {
+    if (header) root.style.setProperty('--header-h', header.offsetHeight + 'px');
+  }
+
+  function updateHeaderState() {
+    if (header) header.classList.toggle('is-scrolled', window.scrollY > 10);
+  }
+
+  /* ------------------------------------------------------------------------
+     3. MOBILE NAVIGATION BEHAVIOUR
+     The HTML has no menu button, so on phones the links simply wrap into
+     two compact rows (handled in CSS). Here we add keyboard support:
+     Left/Right arrows (and Home/End) move between the links.
+     ------------------------------------------------------------------------ */
+  function initNavKeyboard() {
+    var nav = $('#primaryNav');
+    if (!nav) return;
+    var links = $$('.nav-link', nav);
+    if (!links.length) return;
+
+    nav.addEventListener('keydown', function (e) {
+      var index = links.indexOf(document.activeElement);
+      if (index === -1) return;
+      var target = null;
+
+      if (e.key === 'ArrowRight') target = links[(index + 1) % links.length];
+      else if (e.key === 'ArrowLeft') target = links[(index - 1 + links.length) % links.length];
+      else if (e.key === 'Home') target = links[0];
+      else if (e.key === 'End') target = links[links.length - 1];
+
+      if (target) {
+        e.preventDefault();
+        target.focus();
+      }
+    });
+  }
+
+  /* ------------------------------------------------------------------------
+     4. SMOOTH SCROLLING FOR INTERNAL LINKS
+     ------------------------------------------------------------------------ */
+  // Some links in the HTML point to "#resources", which does not exist.
+  // This list sends them to the section that does exist.
+  var HASH_ALIASES = { resources: 'achievements' };
+
+  function findTarget(hash) {
+    var id;
+    try { id = decodeURIComponent(hash.slice(1)); } catch (e) { return null; }
+    return document.getElementById(id) ||
+           (HASH_ALIASES[id] ? document.getElementById(HASH_ALIASES[id]) : null);
+  }
+
+  function initSmoothScroll() {
+    document.addEventListener('click', function (e) {
+      var link = e.target.closest ? e.target.closest('a[href^="#"]') : null;
+      if (!link) return;
+
+      var hash = link.getAttribute('href');
+
+      // Placeholder links (href="#") – do nothing instead of jumping to the top.
+      // Replace them in index.html with real file links when you have them.
+      if (hash === '#') {
+        e.preventDefault();
+        return;
+      }
+
+      var target = findTarget(hash);
+      if (!target) return;            // unknown target: let the browser decide
+
+      e.preventDefault();
+      target.scrollIntoView({
+        behavior: prefersReducedMotion() ? 'auto' : 'smooth',
+        block: 'start'
+      });
+
+      if (window.history && history.pushState) history.pushState(null, '', '#' + target.id);
+
+      // Move keyboard focus to the section so screen readers follow along
+      if (!target.hasAttribute('tabindex')) target.setAttribute('tabindex', '-1');
+      target.focus({ preventScroll: true });
+    });
+  }
+
+  /* ------------------------------------------------------------------------
+     5. ACTIVE NAVIGATION LINK
+     ------------------------------------------------------------------------ */
+  var navLinks = [];
+  var navSections = [];
+
+  function collectNavSections() {
+    navLinks = $$('.nav-link').filter(function (link) {
+      var hash = link.getAttribute('href') || '';
+      return hash.charAt(0) === '#' && document.getElementById(hash.slice(1));
+    });
+    navSections = navLinks.map(function (link) {
+      return document.getElementById(link.getAttribute('href').slice(1));
+    });
+  }
+
+  function updateActiveLink() {
+    if (!navSections.length) return;
+
+    var offset = (header ? header.offsetHeight : 0) + window.innerHeight * 0.25;
+    var current = navSections[0];
+
+    navSections.forEach(function (section) {
+      if (section.getBoundingClientRect().top <= offset) current = section;
+    });
+
+    // At the very bottom of the page, highlight the last section
+    var atBottom = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4;
+    if (atBottom) current = navSections[navSections.length - 1];
+
+    navLinks.forEach(function (link, i) {
+      var isActive = navSections[i] === current;
+      link.classList.toggle('active', isActive);
+      if (isActive) link.setAttribute('aria-current', 'true');
+      else link.removeAttribute('aria-current');
+    });
+  }
+
+  /* ------------------------------------------------------------------------
+     6. BACK-TO-TOP BUTTON
+     ------------------------------------------------------------------------ */
+  function updateBackToTop() {
+    var button = $('#backToTop');
+    if (button) button.classList.toggle('is-visible', window.scrollY > 600);
+  }
+
+  function initBackToTop() {
+    var button = $('#backToTop');
+    if (!button) return;
+
+    button.addEventListener('click', function () {
+      window.scrollTo({ top: 0, behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+      var firstLink = $('.nav-link');
+      if (firstLink) firstLink.focus({ preventScroll: true });
+    });
+  }
+
+  /* ------------------------------------------------------------------------
+     7. SCROLL REVEAL ANIMATIONS
+     Content stays fully visible if IntersectionObserver is missing or the
+     visitor prefers reduced motion.
+     ------------------------------------------------------------------------ */
+  function initReveal() {
+    if (!('IntersectionObserver' in window) || prefersReducedMotion()) return;
+
+    var targets = $$('.section-inner > h2, .about-col, .timeline-item, .card, .contact-info');
+    if (!targets.length) return;
+
+    var observer = new IntersectionObserver(function (entries, obs) {
+      entries.forEach(function (entry) {
+        if (!entry.isIntersecting) return;
+        var el = entry.target;
+        el.classList.add('is-visible');
+        obs.unobserve(el);
+
+        // Once the animation is done, remove the helper classes so that
+        // normal hover effects work again
+        window.setTimeout(function () {
+          el.classList.remove('reveal', 'is-visible');
+          el.style.transitionDelay = '';
+        }, 1000);
+      });
+    }, { threshold: 0.12, rootMargin: '0px 0px -40px 0px' });
+
+    targets.forEach(function (el) {
+      // Small stagger for cards / items that sit next to each other
+      var position = Array.prototype.indexOf.call(el.parentNode.children, el);
+      if (el.classList.contains('card') || el.classList.contains('about-col')) {
+        el.style.transitionDelay = (position % 3) * 90 + 'ms';
+      }
+      el.classList.add('reveal');
+      observer.observe(el);
+    });
+  }
+
+  /* ------------------------------------------------------------------------
+     8. CURRENT YEAR
+     ------------------------------------------------------------------------ */
+  function initYear() {
+    var year = $('#year');
+    if (year) year.textContent = new Date().getFullYear();
+  }
+
+  /* ------------------------------------------------------------------------
+     9. GRACEFUL HANDLING OF MISSING IMAGES
+     A simple neutral icon replaces a broken image; the layout stays intact.
+     No information is invented.
+     ------------------------------------------------------------------------ */
+  var ICON_STYLE = 'fill="none" stroke="#7E93AD" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"';
+  var ICON_DOCUMENT =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" ' + ICON_STYLE + '>' +
+    '<path d="M18 8h20l10 10v38H18zM38 8v10h10M26 30h14M26 38h14M26 46h9"/></svg>';
+  var ICON_PERSON =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" ' + ICON_STYLE + '>' +
+    '<circle cx="32" cy="24" r="10"/><path d="M12 56c2-12 10-18 20-18s18 6 20 18"/></svg>';
+
+  function svgToDataUri(svg) {
+    return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+  }
+
+  function showImageFallback(img) {
+    if (img.getAttribute('data-fallback')) return;      // prevents endless loops
+    img.setAttribute('data-fallback', 'true');
+    img.classList.add('is-broken');
+    img.src = svgToDataUri(img.closest('.hero-photo') ? ICON_PERSON : ICON_DOCUMENT);
+  }
+
+  function initImages() {
+    $$('img').forEach(function (img) {
+      // Accessibility: give images without alt text a description from their card title
+      if (!img.hasAttribute('alt')) {
+        var card = img.closest('.card');
+        var title = card ? $('h3', card) : null;
+        img.alt = title ? 'Preview of ' + title.textContent.trim() : '';
+      }
+
+      img.addEventListener('error', function () { showImageFallback(img); });
+
+      // The image may have failed before this script ran
+      if (img.complete && img.naturalWidth === 0 && img.getAttribute('src')) showImageFallback(img);
+    });
+  }
+
+  /* ------------------------------------------------------------------------
+     10. CONTACT LINKS
+     Makes the visible email and phone number tappable on phones, without
+     changing what the visitor reads.
+     ------------------------------------------------------------------------ */
+  var EMAIL_PATTERN = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i;
+  var PHONE_PATTERN = /\+?\d[\d\s-]{7,}\d/;
+
+  // Turn matching text inside a text node into a link
+  function linkifyTextNode(node, pattern, buildHref) {
+    var match = node.nodeValue.match(pattern);
+    if (!match) return;
+
+    var link = document.createElement('a');
+    link.href = buildHref(match[0]);
+    link.textContent = match[0];
+
+    var after = node.splitText(match.index + match[0].length);
+    node.nodeValue = node.nodeValue.slice(0, match.index);
+    node.parentNode.insertBefore(link, after);
+  }
+
+  function initContactLinks() {
+    // The email link's href is a placeholder in the HTML – use the visible address instead
+    $$('a[href^="mailto:"]').forEach(function (link) {
+      var href = link.getAttribute('href');
+      var text = link.textContent.trim();
+      if (/[\[\]]/.test(href) && EMAIL_PATTERN.test(text)) link.setAttribute('href', 'mailto:' + text);
+    });
+
+    // Plain-text email / phone in the contact block and footer become links
+    $$('.contact-info > p, .footer-contact p').forEach(function (paragraph) {
+      Array.prototype.slice.call(paragraph.childNodes).forEach(function (node) {
+        if (node.nodeType !== 3) return;   // text nodes only
+        linkifyTextNode(node, EMAIL_PATTERN, function (value) { return 'mailto:' + value; });
+        linkifyTextNode(node, PHONE_PATTERN, function (value) { return 'tel:' + value.replace(/[^\d+]/g, ''); });
+      });
+    });
+  }
+
+  /* ------------------------------------------------------------------------
+     11. SKIP LINK (keyboard users can jump straight to the content)
+     ------------------------------------------------------------------------ */
+  function initSkipLink() {
+    var main = $('#main');
+    if (!main || !document.body) return;
+
+    var skip = document.createElement('a');
+    skip.className = 'skip-link';
+    skip.href = '#main';
+    skip.textContent = 'Skip to main content';
+    document.body.insertBefore(skip, document.body.firstChild);
+
+    skip.addEventListener('click', function (e) {
+      e.preventDefault();
+      main.setAttribute('tabindex', '-1');
+      main.focus();
+    });
+  }
+
+  /* ------------------------------------------------------------------------
+     12. START EVERYTHING
+     ------------------------------------------------------------------------ */
+  var ticking = false;
+
+  function onScroll() {
+    if (ticking) return;
+    ticking = true;
+    window.requestAnimationFrame(function () {
+      updateHeaderState();
+      updateActiveLink();
+      updateBackToTop();
+      ticking = false;
+    });
+  }
+
+  function init() {
+    initTheme();
+    initSkipLink();
+    initNavKeyboard();
+    initSmoothScroll();
+    initBackToTop();
+    initYear();
+    initImages();
+    initContactLinks();
+
+    collectNavSections();
+    setHeaderOffset();
+    updateHeaderState();
+    updateActiveLink();
+    updateBackToTop();
+
+    initReveal();
+
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', function () { setHeaderOffset(); onScroll(); });
+    window.addEventListener('load', setHeaderOffset);
+    if ('ResizeObserver' in window && header) new ResizeObserver(setHeaderOffset).observe(header);
+  }
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+  else init();
+})();
